@@ -1,0 +1,791 @@
+---
+title: "Task 1"
+author: "António Pedro Pinheiro"
+date: "2024-01-03"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+subtitle: Data Understanding + Preparation + Descriptive Analytics
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(corrplot)
+library(ggbiplot)
+library(FSelector)
+library(Rdimtools)
+library(mlbench)
+library(caret)
+library(randomForest)
+library(vcd)
+library(Boruta)
+library(party)
+library(earth)
+library(factoextra)
+library(cluster)
+library(FactoMineR)
+library(arules)
+library(robustbase)
+setwd("C:/Users/anton/Desktop/António/Mestrado MSI/1º Ano/Deteção de Fraude/Trabalho Individual")
+```
+
+### **Data Import + Pre-Processing**
+
+<br>
+
+#### **Importação do *Dataset***
+
+```{r data import}
+data <- read_csv("train.csv")
+test_data <- read_csv("test.csv")
+```
+
+<br>
+
+#### **Codificação do Tipo das Variáveis Categóricas**
+
+```{r categorical attributes codification}
+data$payment_type <- as.factor(data$payment_type)
+
+data$employment_status <- as.factor(data$employment_status)
+
+data$email_is_free <- as.factor(data$email_is_free)
+
+data$housing_status <- as.factor(data$housing_status)
+
+data$phone_home_valid <- as.factor(data$phone_home_valid)
+
+data$phone_mobile_valid <- as.factor(data$phone_mobile_valid)
+
+data$has_other_cards <- as.factor(data$has_other_cards)
+
+data$foreign_request <- as.factor(data$foreign_request)
+
+data$source <- as.factor(data$source)
+
+data$device_os <- as.factor(data$device_os)
+
+data$keep_alive_session <- as.factor(data$keep_alive_session)
+
+data$fraud_bool <- as.factor(data$fraud_bool)
+
+test_data$payment_type <- as.factor(test_data$payment_type)
+
+test_data$employment_status <- as.factor(test_data$employment_status)
+
+test_data$email_is_free <- as.factor(test_data$email_is_free)
+
+test_data$housing_status <- as.factor(test_data$housing_status)
+
+test_data$phone_home_valid <- as.factor(test_data$phone_home_valid)
+
+test_data$phone_mobile_valid <- as.factor(test_data$phone_mobile_valid)
+
+test_data$has_other_cards <- as.factor(test_data$has_other_cards)
+
+test_data$foreign_request <- as.factor(test_data$foreign_request)
+
+test_data$source <- as.factor(test_data$source)
+
+test_data$device_os <- as.factor(test_data$device_os)
+
+test_data$keep_alive_session <- as.factor(test_data$keep_alive_session)
+```
+
+<br>
+
+#### **Atribuição de *Missing Values***
+
+```{r missing values attribution/codification}
+#De acordo com a especificação do dataset, o valor {-1} nos seguintes atributos corresponde a missing values.
+
+data$prev_address_months_count[data$prev_address_months_count == -1] <- NA
+data$current_address_months_count[data$current_address_months_count == -1] <- NA
+data$bank_months_count[data$bank_months_count == -1] <- NA
+
+test_data$prev_address_months_count[test_data$prev_address_months_count == -1] <- NA
+test_data$current_address_months_count[test_data$current_address_months_count == -1] <- NA
+test_data$bank_months_count[test_data$bank_months_count == -1] <- NA
+```
+
+<br>
+
+### **Data Summarization**
+
+```{r data summarization}
+summary(data)
+
+#Considerou-se interessante perceber a magnitude (número de casos) no train dataset que não respeitam as condições estabelecidas no detalhe do enunciado (10 <= customer_age <= 90)
+count(data$customer_age<10)
+count(data$customer_age>90)
+summary(test_data)
+#Considerou-se interessante perceber a magnitude (número de casos) no test dataset que não respeitam as condições estabelecidas no detalhe do enunciado (10 <= customer_age <= 90)
+count(test_data$customer_age<10)
+count(test_data$customer_age>90)
+```
+
+<br>
+
+### **Data Visualization**
+
+```{r data visualization}
+ggplot(data, aes(x = fraud_bool, y = income)) + geom_boxplot() + coord_flip() + ggtitle("Boxplot of income by fraud_bool")
+ggplot(data, aes(x = income)) + geom_histogram(binwidth = 0.1)+ ggtitle("Histogram of income")
+ggplot(data, aes(x = income)) + geom_histogram(binwidth = 0.1, aes(y = ..density..)) + geom_density(color = "blue") + geom_rug() + ggtitle("Histogram of income with density line")
+ggplot(data, aes(x = income)) + geom_histogram(binwidth = 0.1) + facet_grid(fraud_bool~month, scales = "free_y") + ggtitle("Histogram of income by fraud_bool and month")
+data %>% 
+  select(customer_age, income, name_email_similarity, zip_count_4w, velocity_6h, velocity_24h) %>% 
+  gather(metric, value) %>% 
+  ggplot(aes(value, fill = metric)) + 
+  geom_density(show.legend = FALSE) + 
+  facet_wrap(~ metric, scales = "free") +
+  ggtitle("Density plots")
+ggplot(data, aes(x = customer_age, fill = factor(fraud_bool))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density plot of customer_age by fraud_bool",
+       x = "customer_age",
+       y = "Density",
+       fill = "Fraud") +
+  scale_fill_manual(values = c("blue", "red"), labels = c("No Fraud (0)", "Fraud (1)"))
+ggplot(data, aes(x = name_email_similarity, fill = factor(fraud_bool))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density plot of name_email_similarity by fraud_bool",
+       x = "name_email_similarity",
+       y = "Density",
+       fill = "Fraud") +
+  scale_fill_manual(values = c("blue", "red"), labels = c("No Fraud (0)", "Fraud (1)"))
+ggplot(data, aes(x = zip_count_4w, fill = factor(fraud_bool))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density plot of zip_count_4w by fraud_bool",
+       x = "zip_count_4w",
+       y = "Density",
+       fill = "Fraud") +
+  scale_fill_manual(values = c("blue", "red"), labels = c("No Fraud (0)", "Fraud (1)"))
+ggplot(data, aes(x = prev_address_months_count, fill = factor(fraud_bool))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density plot of prev_address_months_count by fraud_bool",
+       x = "prev_address_months_count",
+       y = "Density",
+       fill = "Fraud") +
+  scale_fill_manual(values = c("blue", "red"), labels = c("No Fraud (0)", "Fraud (1)"))
+ggplot(data, aes(x = bank_months_count, fill = factor(fraud_bool))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density plot of bank_months_count by fraud_bool",
+       x = "bank_months_count",
+       y = "Density",
+       fill = "Fraud") +
+  scale_fill_manual(values = c("blue", "red"), labels = c("No Fraud (0)", "Fraud (1)"))
+ggplot(data, aes(x = customer_age)) + geom_histogram(binwidth = 10)+ ggtitle("Histogram of customer_age")
+counts <- table(data$fraud_bool)
+barplot(counts, main="Fraud Distribution",
+   xlab="Fraud vs. No Fraud")
+counts <- table(data$device_fraud_count)
+barplot(counts, main="Device Fraud Count Distribution")
+data_ca <- subset(data, customer_age <10 | customer_age >90)
+ggplot(data_ca, aes(x = customer_age)) + geom_histogram(binwidth = 10)+ ggtitle("Histogram of customer_age outliers")
+```
+
+<br>
+
+### Data Preparation
+
+<br>
+
+#### Sampling Data
+
+```{r train/validation set}
+set.seed(4)
+data_split <- data %>% initial_split(prop = 0.7, strata = fraud_bool)
+data_split
+train <- training(data_split)
+validation <- testing(data_split)
+summary(train$fraud_bool)
+summary(validation$fraud_bool)
+```
+
+<br>
+
+#### Data Quality
+
+```{r data quality}
+#Data Cleaning (Consistencies)
+count(train$customer_age)
+train$customer_age <- round_any(train$customer_age, 10)
+train <- subset(train, customer_age >=10)
+train <- subset(train, customer_age <=90)
+
+#Missing Values
+data_rec <- recipe(fraud_bool ~ ., train)
+data_rec
+data_rec <- data_rec %>%
+  step_impute_mode(all_nominal()) %>%
+  step_impute_mean(all_numeric()) %>%
+prep()
+```
+
+<br>
+
+#### Data Transformation
+
+<br>
+
+-   **Data Normalization**
+
+```{r data normalization}
+data_rec <- data_rec %>%
+  step_normalize(all_numeric_predictors()) %>%
+prep()
+
+test_data$fraud_bool <- 1
+test_data$fraud_bool <- as.factor(test_data$fraud_bool)
+
+train_input <- data_rec %>%
+bake(new_data = NULL)
+
+validation_input <- data_rec %>%
+bake(new_data = validation)
+
+test_input <- data_rec %>%
+bake(new_data = test_data)
+
+summary(train_input)
+summary(validation_input)
+test_data$fraud_bool <- NULL
+
+test_input$fraud_bool <- NULL
+
+validation_input$...1<-validation$...1
+
+test_input$...1<-test_data$...1
+summary(test_input)
+```
+
+#### Removal of Redundant Attributes
+
+<br>
+
+```{r early attribute elimination}
+#Atributo ID é inútil para modelação preditiva e apenas serve de identificação dos casos.
+train_input <- train_input[,-1]
+
+#Os atributos prev_address_months_count e bank_months_count apresentam muito valores em falta, enquanto que o atributo device_fraud_count apresenta o valor de zero (0) para todos os casos no dataset.
+train_input <- train_input %>% select(-c(prev_address_months_count, bank_months_count, device_fraud_count))
+
+train_input_numeric <- train_input %>% select(where(is.numeric))
+```
+
+<br>
+
+-   **Feature Selection**
+
+    <br>
+
+    ##### Correlation Matrix (Numeric Variables)
+
+```{r correlation matrix}
+res <- train_input_numeric %>%
+  cor(method = "spearman") # Método Spearman foi usado devido à presença de variáveis númericas discretas e contínuas. O método de Pearson assume que as variáveis seguem uma distribuição normal, algo que uma variável discreta nunca será. O método de Spearman não assume isso.
+
+corrplot(res, type = "lower", method = "number", number.cex = 0.5, diag = FALSE)
+corrplot.mixed(res, lower = "circle", upper = "number", number.cex = 0.5, tl.col = "black", tl.cex = 0.5)
+```
+
+<br>
+
+------------------------------------------------------------------------
+
+##### Chi-Square Test (Categorical Variables)
+
+```{r chi-square test}
+set.seed(4)
+data_sub_chi<- train_input
+
+#Representação Gráfica do Teste Chi-Square para 2 atributos
+mosaic(~ payment_type + employment_status,
+  direction = c("v", "h"),
+  data = data_sub_chi,
+  shade = TRUE
+)
+
+table(data_sub_chi$payment_type, data_sub_chi$employment_status)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$employment_status, simulate.p.value = TRUE)
+fisher.test(data_sub_chi$payment_type, data_sub_chi$employment_status, simulate.p.value=TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$email_is_free, simulate.p.value = TRUE)
+fisher.test(data_sub_chi$payment_type, data_sub_chi$email_is_free, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$housing_status, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$phone_home_valid, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$phone_mobile_valid, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$has_other_cards, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$foreign_request, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$source, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$payment_type, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+chisq.test(data_sub_chi$employment_status, data_sub_chi$email_is_free, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$employment_status, data_sub_chi$housing_status, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$employment_status, data_sub_chi$phone_home_valid, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$employment_status, data_sub_chi$phone_mobile_valid, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$employment_status, data_sub_chi$has_other_cards, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$employment_status, data_sub_chi$foreign_request, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$employment_status, data_sub_chi$source, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$employment_status, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$employment_status, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+chisq.test(data_sub_chi$email_is_free, data_sub_chi$housing_status, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$email_is_free, data_sub_chi$phone_home_valid, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$email_is_free, data_sub_chi$phone_mobile_valid, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$email_is_free, data_sub_chi$has_other_cards, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$email_is_free, data_sub_chi$foreign_request, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$email_is_free, data_sub_chi$source, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$email_is_free, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$email_is_free, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+chisq.test(data_sub_chi$housing_status, data_sub_chi$phone_home_valid, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$housing_status, data_sub_chi$phone_mobile_valid, simulate.p.value = TRUE)  
+chisq.test(data_sub_chi$housing_status, data_sub_chi$has_other_cards, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$housing_status, data_sub_chi$foreign_request, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$housing_status, data_sub_chi$source, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$housing_status, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$housing_status, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+
+chisq.test(data_sub_chi$phone_home_valid, data_sub_chi$phone_mobile_valid, simulate.p.value = TRUE)  
+chisq.test(data_sub_chi$phone_home_valid, data_sub_chi$has_other_cards, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$phone_home_valid, data_sub_chi$foreign_request, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$phone_home_valid, data_sub_chi$source, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$phone_home_valid, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$phone_home_valid, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+chisq.test(data_sub_chi$phone_mobile_valid, data_sub_chi$has_other_cards, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$phone_mobile_valid, data_sub_chi$foreign_request, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$phone_mobile_valid, data_sub_chi$source, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$phone_mobile_valid, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$phone_mobile_valid, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+chisq.test(data_sub_chi$has_other_cards, data_sub_chi$foreign_request, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$has_other_cards, data_sub_chi$source, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$has_other_cards, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$has_other_cards, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+chisq.test(data_sub_chi$foreign_request, data_sub_chi$source, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$foreign_request, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$foreign_request, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+chisq.test(data_sub_chi$source, data_sub_chi$device_os, simulate.p.value = TRUE)
+chisq.test(data_sub_chi$source, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+
+chisq.test(data_sub_chi$device_os, data_sub_chi$keep_alive_session, simulate.p.value = TRUE)
+```
+
+<br>
+
+##### ANOVA (Numeric-Categorical Attributes)
+
+```{r anova}
+one.way <- aov(income ~ payment_type, data = data_sub_chi)
+one.way <- aov(income ~ email_is_free, data = data_sub_chi)
+one.way <- aov(income ~ housing_status, data = data_sub_chi)
+one.way <- aov(income ~ phone_home_valid, data = data_sub_chi) 
+one.way <- aov(income ~ phone_mobile_valid, data = data_sub_chi) 
+one.way <- aov(income ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(income ~ foreign_request, data = data_sub_chi)
+one.way <- aov(income ~ source, data = data_sub_chi)  
+one.way <- aov(income ~ device_os, data = data_sub_chi)
+one.way <- aov(income ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(name_email_similarity ~ payment_type, data = data_sub_chi)
+one.way <- aov(name_email_similarity ~ employment_status, data = data_sub_chi)
+one.way <- aov(name_email_similarity ~ email_is_free, data = data_sub_chi)
+one.way <- aov(name_email_similarity ~ housing_status, data = data_sub_chi)
+one.way <- aov(name_email_similarity ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(name_email_similarity ~ phone_mobile_valid, data = data_sub_chi) 
+one.way <- aov(name_email_similarity ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(name_email_similarity ~ foreign_request, data = data_sub_chi)
+one.way <- aov(name_email_similarity ~ source, data = data_sub_chi)  
+one.way <- aov(name_email_similarity ~ device_os, data = data_sub_chi)
+one.way <- aov(name_email_similarity ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(current_address_months_count ~ payment_type, data = data_sub_chi)
+one.way <- aov(current_address_months_count ~ employment_status, data = data_sub_chi)
+one.way <- aov(current_address_months_count ~ email_is_free, data = data_sub_chi)
+one.way <- aov(current_address_months_count ~ housing_status, data = data_sub_chi)
+one.way <- aov(current_address_months_count ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(current_address_months_count ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(current_address_months_count ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(current_address_months_count ~ foreign_request, data = data_sub_chi)  
+one.way <- aov(current_address_months_count ~ source, data = data_sub_chi)  
+one.way <- aov(current_address_months_count ~ device_os, data = data_sub_chi)
+one.way <- aov(current_address_months_count ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(customer_age ~ payment_type, data = data_sub_chi)
+one.way <- aov(customer_age ~ employment_status, data = data_sub_chi)
+one.way <- aov(customer_age ~ email_is_free, data = data_sub_chi)
+one.way <- aov(customer_age ~ housing_status, data = data_sub_chi)
+one.way <- aov(customer_age ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(customer_age ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(customer_age ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(customer_age ~ foreign_request, data = data_sub_chi)
+one.way <- aov(customer_age ~ source, data = data_sub_chi)  
+one.way <- aov(customer_age ~ device_os, data = data_sub_chi)
+one.way <- aov(customer_age ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(days_since_request ~ payment_type, data = data_sub_chi)
+one.way <- aov(days_since_request ~ employment_status, data = data_sub_chi)
+one.way <- aov(days_since_request ~ email_is_free, data = data_sub_chi)
+one.way <- aov(days_since_request ~ housing_status, data = data_sub_chi)
+one.way <- aov(days_since_request ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(days_since_request ~ phone_mobile_valid, data = data_sub_chi)  
+one.way <- aov(days_since_request ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(days_since_request ~ foreign_request, data = data_sub_chi)  
+one.way <- aov(days_since_request ~ source, data = data_sub_chi)  
+one.way <- aov(days_since_request ~ device_os, data = data_sub_chi)
+one.way <- aov(days_since_request ~ keep_alive_session, data = data_sub_chi)  
+
+
+one.way <- aov(intended_balcon_amount ~ payment_type, data = data_sub_chi)
+one.way <- aov(intended_balcon_amount ~ employment_status, data = data_sub_chi)
+one.way <- aov(intended_balcon_amount ~ email_is_free, data = data_sub_chi)
+one.way <- aov(intended_balcon_amount ~ housing_status, data = data_sub_chi)
+one.way <- aov(intended_balcon_amount ~ phone_home_valid, data = data_sub_chi)  
+one.way <- aov(intended_balcon_amount ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(intended_balcon_amount ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(intended_balcon_amount ~ foreign_request, data = data_sub_chi)  
+one.way <- aov(intended_balcon_amount ~ source, data = data_sub_chi)  
+one.way <- aov(intended_balcon_amount ~ device_os, data = data_sub_chi)
+one.way <- aov(intended_balcon_amount ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(zip_count_4w ~ payment_type, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ employment_status, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ email_is_free, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ housing_status, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ foreign_request, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ source, data = data_sub_chi)  
+one.way <- aov(zip_count_4w ~ device_os, data = data_sub_chi)
+one.way <- aov(zip_count_4w ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(velocity_6h ~ payment_type, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ employment_status, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ email_is_free, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ housing_status, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ foreign_request, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ source, data = data_sub_chi)  
+one.way <- aov(velocity_6h ~ device_os, data = data_sub_chi)
+one.way <- aov(velocity_6h ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(velocity_24h ~ payment_type, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ employment_status, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ email_is_free, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ housing_status, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ foreign_request, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ source, data = data_sub_chi)  
+one.way <- aov(velocity_24h ~ device_os, data = data_sub_chi)
+one.way <- aov(velocity_24h ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(velocity_4w ~ payment_type, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ employment_status, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ email_is_free, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ housing_status, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ foreign_request, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ source, data = data_sub_chi)  
+one.way <- aov(velocity_4w ~ device_os, data = data_sub_chi)
+one.way <- aov(velocity_4w ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(bank_branch_count_8w ~ payment_type, data = data_sub_chi)
+one.way <- aov(bank_branch_count_8w ~ employment_status, data = data_sub_chi)
+one.way <- aov(bank_branch_count_8w ~ email_is_free, data = data_sub_chi)  
+one.way <- aov(bank_branch_count_8w ~ housing_status, data = data_sub_chi)
+one.way <- aov(bank_branch_count_8w ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(bank_branch_count_8w ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(bank_branch_count_8w ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(bank_branch_count_8w ~ foreign_request, data = data_sub_chi)  
+one.way <- aov(bank_branch_count_8w ~ source, data = data_sub_chi)  
+one.way <- aov(bank_branch_count_8w ~ device_os, data = data_sub_chi)
+one.way <- aov(bank_branch_count_8w ~ keep_alive_session, data = data_sub_chi)  
+
+
+one.way <- aov(date_of_birth_distinct_emails_4w ~ payment_type, data = data_sub_chi)
+one.way <- aov(date_of_birth_distinct_emails_4w ~ employment_status, data = data_sub_chi)
+one.way <- aov(date_of_birth_distinct_emails_4w ~ email_is_free, data = data_sub_chi)
+one.way <- aov(date_of_birth_distinct_emails_4w ~ housing_status, data = data_sub_chi)
+one.way <- aov(date_of_birth_distinct_emails_4w ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(date_of_birth_distinct_emails_4w ~ phone_mobile_valid, data = data_sub_chi)  
+one.way <- aov(date_of_birth_distinct_emails_4w ~ has_other_cards, data = data_sub_chi)
+one.way <- aov(date_of_birth_distinct_emails_4w ~ foreign_request, data = data_sub_chi)
+one.way <- aov(date_of_birth_distinct_emails_4w ~ source, data = data_sub_chi)  
+one.way <- aov(date_of_birth_distinct_emails_4w ~ device_os, data = data_sub_chi)
+one.way <- aov(date_of_birth_distinct_emails_4w ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(credit_risk_score ~ payment_type, data = data_sub_chi)
+one.way <- aov(credit_risk_score ~ employment_status, data = data_sub_chi)
+one.way <- aov(credit_risk_score ~ email_is_free, data = data_sub_chi)
+one.way <- aov(credit_risk_score ~ housing_status, data = data_sub_chi)
+one.way <- aov(credit_risk_score ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(credit_risk_score ~ phone_mobile_valid, data = data_sub_chi)  
+one.way <- aov(credit_risk_score ~ has_other_cards, data = data_sub_chi) 
+one.way <- aov(credit_risk_score ~ foreign_request, data = data_sub_chi)
+one.way <- aov(credit_risk_score ~ source, data = data_sub_chi)  
+one.way <- aov(credit_risk_score ~ device_os, data = data_sub_chi)
+one.way <- aov(credit_risk_score ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(proposed_credit_limit ~ payment_type, data = data_sub_chi)
+one.way <- aov(proposed_credit_limit ~ employment_status, data = data_sub_chi)
+one.way <- aov(proposed_credit_limit ~ email_is_free, data = data_sub_chi)
+one.way <- aov(proposed_credit_limit ~ housing_status, data = data_sub_chi)  
+one.way <- aov(proposed_credit_limit ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(proposed_credit_limit ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(proposed_credit_limit ~ has_other_cards, data = data_sub_chi) 
+one.way <- aov(proposed_credit_limit ~ foreign_request, data = data_sub_chi)
+one.way <- aov(proposed_credit_limit ~ source, data = data_sub_chi)   
+one.way <- aov(proposed_credit_limit ~ device_os, data = data_sub_chi)
+one.way <- aov(proposed_credit_limit ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(session_length_in_minutes ~ payment_type, data = data_sub_chi)
+one.way <- aov(session_length_in_minutes ~ employment_status, data = data_sub_chi)
+one.way <- aov(session_length_in_minutes ~ email_is_free, data = data_sub_chi)
+one.way <- aov(session_length_in_minutes ~ housing_status, data = data_sub_chi)
+one.way <- aov(session_length_in_minutes ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(session_length_in_minutes ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(session_length_in_minutes ~ has_other_cards, data = data_sub_chi) 
+one.way <- aov(session_length_in_minutes ~ foreign_request, data = data_sub_chi)
+one.way <- aov(session_length_in_minutes ~ source, data = data_sub_chi)  
+one.way <- aov(session_length_in_minutes ~ device_os, data = data_sub_chi)
+one.way <- aov(session_length_in_minutes ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(device_distinct_emails_8w ~ payment_type, data = data_sub_chi)
+one.way <- aov(device_distinct_emails_8w ~ employment_status, data = data_sub_chi)
+one.way <- aov(device_distinct_emails_8w ~ email_is_free, data = data_sub_chi)
+one.way <- aov(device_distinct_emails_8w ~ housing_status, data = data_sub_chi)
+one.way <- aov(device_distinct_emails_8w ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(device_distinct_emails_8w ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(device_distinct_emails_8w ~ has_other_cards, data = data_sub_chi) 
+one.way <- aov(device_distinct_emails_8w ~ foreign_request, data = data_sub_chi)
+one.way <- aov(device_distinct_emails_8w ~ source, data = data_sub_chi)  
+one.way <- aov(device_distinct_emails_8w ~ device_os, data = data_sub_chi)
+one.way <- aov(device_distinct_emails_8w ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(month ~ payment_type, data = data_sub_chi)
+one.way <- aov(month ~ employment_status, data = data_sub_chi)
+one.way <- aov(month ~ email_is_free, data = data_sub_chi)
+one.way <- aov(month ~ housing_status, data = data_sub_chi)
+one.way <- aov(month ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(month ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(month ~ has_other_cards, data = data_sub_chi) 
+one.way <- aov(month ~ foreign_request, data = data_sub_chi)
+one.way <- aov(month ~ source, data = data_sub_chi)  
+one.way <- aov(month ~ device_os, data = data_sub_chi)
+one.way <- aov(month ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(credit_utilization_ratio ~ payment_type, data = data_sub_chi)
+one.way <- aov(credit_utilization_ratio ~ employment_status, data = data_sub_chi)
+one.way <- aov(credit_utilization_ratio ~ email_is_free, data = data_sub_chi)
+one.way <- aov(credit_utilization_ratio ~ housing_status, data = data_sub_chi)
+one.way <- aov(credit_utilization_ratio ~ phone_home_valid, data = data_sub_chi)  
+one.way <- aov(credit_utilization_ratio ~ phone_mobile_valid, data = data_sub_chi)  
+one.way <- aov(credit_utilization_ratio ~ has_other_cards, data = data_sub_chi) 
+one.way <- aov(credit_utilization_ratio ~ foreign_request, data = data_sub_chi)
+one.way <- aov(credit_utilization_ratio ~ source, data = data_sub_chi)  
+one.way <- aov(credit_utilization_ratio ~ device_os, data = data_sub_chi)
+one.way <- aov(credit_utilization_ratio ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(distance_to_nearest_bank_branch ~ payment_type, data = data_sub_chi)   
+one.way <- aov(distance_to_nearest_bank_branch ~ employment_status, data = data_sub_chi)  
+one.way <- aov(distance_to_nearest_bank_branch ~ email_is_free, data = data_sub_chi)   
+one.way <- aov(distance_to_nearest_bank_branch ~ housing_status, data = data_sub_chi)   
+one.way <- aov(distance_to_nearest_bank_branch ~ phone_home_valid, data = data_sub_chi)   
+one.way <- aov(distance_to_nearest_bank_branch ~ phone_mobile_valid, data = data_sub_chi)   
+one.way <- aov(distance_to_nearest_bank_branch ~ has_other_cards, data = data_sub_chi)   
+one.way <- aov(distance_to_nearest_bank_branch ~ foreign_request, data = data_sub_chi)   
+one.way <- aov(distance_to_nearest_bank_branch ~ source, data = data_sub_chi)    
+one.way <- aov(distance_to_nearest_bank_branch ~ device_os, data = data_sub_chi)  
+one.way <- aov(distance_to_nearest_bank_branch ~ keep_alive_session, data = data_sub_chi)  
+
+
+one.way <- aov(recent_loan_approval_ratio ~ payment_type, data = data_sub_chi)
+one.way <- aov(recent_loan_approval_ratio ~ employment_status, data = data_sub_chi)
+one.way <- aov(recent_loan_approval_ratio ~ email_is_free, data = data_sub_chi)
+one.way <- aov(recent_loan_approval_ratio ~ housing_status, data = data_sub_chi)
+one.way <- aov(recent_loan_approval_ratio ~ phone_home_valid, data = data_sub_chi)
+one.way <- aov(recent_loan_approval_ratio ~ phone_mobile_valid, data = data_sub_chi)
+one.way <- aov(recent_loan_approval_ratio ~ has_other_cards, data = data_sub_chi) 
+one.way <- aov(recent_loan_approval_ratio ~ foreign_request, data = data_sub_chi)
+one.way <- aov(recent_loan_approval_ratio ~ source, data = data_sub_chi)  
+one.way <- aov(recent_loan_approval_ratio ~ device_os, data = data_sub_chi)
+one.way <- aov(recent_loan_approval_ratio ~ keep_alive_session, data = data_sub_chi)
+
+
+one.way <- aov(transaction_amount_ratio ~ payment_type, data = data_sub_chi)
+one.way <- aov(transaction_amount_ratio ~ employment_status, data = data_sub_chi)
+one.way <- aov(transaction_amount_ratio ~ email_is_free, data = data_sub_chi)
+one.way <- aov(transaction_amount_ratio ~ housing_status, data = data_sub_chi)
+one.way <- aov(transaction_amount_ratio ~ phone_home_valid, data = data_sub_chi) 
+one.way <- aov(transaction_amount_ratio ~ phone_mobile_valid, data = data_sub_chi) 
+one.way <- aov(transaction_amount_ratio ~ has_other_cards, data = data_sub_chi) 
+one.way <- aov(transaction_amount_ratio ~ foreign_request, data = data_sub_chi)
+one.way <- aov(transaction_amount_ratio ~ source, data = data_sub_chi)  
+one.way <- aov(transaction_amount_ratio ~ device_os, data = data_sub_chi)
+one.way <- aov(transaction_amount_ratio ~ keep_alive_session, data = data_sub_chi)
+```
+
+<br>
+
+##### Principal Component Analysis
+
+```{r pca}
+#Apenas com atributos numéricos
+res_pca <- prcomp(train_input_numeric, scale = TRUE, center = TRUE)
+res_pca
+ggbiplot(res_pca, labels = rownames(train_input_numeric))
+
+#Incluindo atributos categóricos, após fazer o seu one hot encoding
+non_numeric_attributes <- sapply(train_input, function(col) !is.numeric(col))
+categorical_attributes <- names(train_input)[non_numeric_attributes]
+data_hot_encoding <- train_input %>%
+  dplyr::select(all_of(categorical_attributes)) %>%
+  mutate_all(as.factor) %>%
+  model.matrix(~.-1, data = .)
+data_all_numeric <- bind_cols(train_input %>% dplyr::select(-all_of(categorical_attributes)), data_hot_encoding)
+train_pca_input <- PCA(data_all_numeric, graph = TRUE)
+#Através da percentagem de variância explicada pelos componentes, percebemos que para atingir uma percentagem de variância aceitável (~80%), necessitariamos de 31 componentes, pelo que não há benefício considerável em utilizar PCA.
+train_pca_input$eig
+```
+
+<br>
+
+##### Information Gain
+
+```{r information gain}
+information_gain <- information.gain(fraud_bool~., train_input)
+information_gain
+```
+
+<br>
+
+##### Boruta Algorithm
+
+```{r boruta algorithm}
+set.seed(111)
+boruta.train <- Boruta(fraud_bool~., data = train_input, doTrace = 2)
+print(boruta.train)
+
+#take a call on tentative features
+boruta.final <- TentativeRoughFix(boruta.train)
+print(boruta.final)
+
+plot(boruta.final, xlab = "", xaxt = "n")
+lz<-lapply(1:ncol(boruta.final$ImpHistory),function(i)
+  boruta.final$ImpHistory[is.finite(boruta.final$ImpHistory[,i]),i])
+names(lz) <- colnames(boruta.final$ImpHistory)
+Labels <- sort(sapply(lz,median))
+axis(side = 1,las=2,labels = names(Labels),
+     at = 1:ncol(boruta.final$ImpHistory), cex.axis = 0.7)
+
+getSelectedAttributes(boruta.final, withTentative = F)
+```
+
+<br>
+
+##### Random Forest Method
+
+```{r random forest}
+fit_rf = randomForest(fraud_bool~., data=train_input)
+# Create an importance based on mean decreasing gini
+importance(fit_rf)
+varImp(fit_rf)
+varImpPlot(fit_rf)
+```
+
+<br>
+
+##### Variable importance with rpart (Recursive Partitioning and Regression Trees - CART)
+
+```{r rpart}
+model_rpart <- train(fraud_bool ~ ., data=train_input, method = "rpart")
+output <- varImp(model_rpart)
+output
+```
+
+<br>
+
+-   **Clustering**
+
+<br>
+
+##### k-Means Clustering
+
+```{r k-means clustering}
+k <- kmeans(train_input_numeric, centers = 5)
+k
+fviz_cluster(k, train_input_numeric, 
+             ellipse.type = "convex",
+             geom=c("point"), 
+             palette = "jco", 
+             ggtheme = theme_classic())
+```
+
+<br>
+
+##### CLARA Clustering
+
+```{r clara clustering}
+clara.res <- clara(train_input, k=3, metric = "euclidean", stand = FALSE, 
+      samples = 20000, pamLike = TRUE)
+print(clara.res)
+fviz_cluster(clara.res, train_input)
+fviz_cluster(clara.res, train_input, 
+             ellipse.type = "convex",
+             geom=c("point"), 
+             palette = "jco", 
+             ggtheme = theme_classic())
+```
+
+### Selecting Features
+
+```{r selecting features}
+train_input <- train_input %>% select(-c(transaction_amount_ratio, credit_utilization_ratio, device_distinct_emails_8w, foreign_request, source, phone_mobile_valid, has_other_cards, email_is_free))
+```
+
+<br>
+
+### Saving the datasets ready for predictive modeling
+
+```{r saving the datasets}
+#Save csv file with the new data
+write_csv(train_input, file = "train_input.csv")
+write_csv(validation_input, file = "validation_input.csv")
+write_csv(test_input, file = "test_input.csv")
+save(data_split, file = "data_split.RData")
+```

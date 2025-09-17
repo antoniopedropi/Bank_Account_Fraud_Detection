@@ -1,0 +1,1915 @@
+---
+title: "Task 2"
+author: "António Pedro Pinheiro"
+date: "2024-01-03"
+output:
+  html_document:
+    df_print: paged
+subtitle: Predictive Modelling
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(randomForest)
+library(ROSE)
+library(pROC)
+library(kknn)
+library(Metrics)
+library(stats)
+library(rpart.plot)  # for visualizing a decision tree
+library(vip)
+library(doParallel)
+library(naivebayes)
+setwd("C:/Users/anton/Desktop/António/Mestrado MSI/1º Ano/Deteção de Fraude/Trabalho Individual")
+load("data_split.RData")
+```
+
+### **Data Import**
+
+<br>
+
+#### **Importação dos *Datasets Preparados***
+
+```{r data import}
+train_input <- read_csv("train_input.csv")
+validation_input <- read_csv("validation_input.csv")
+test_input <- read_csv("test_input.csv")
+
+train_input$payment_type <- as.factor(train_input$payment_type)
+train_input$employment_status <- as.factor(train_input$employment_status)
+train_input$email_is_free <- as.factor(train_input$email_is_free)
+train_input$housing_status <- as.factor(train_input$housing_status)
+train_input$phone_home_valid <- as.factor(train_input$phone_home_valid)
+train_input$phone_mobile_valid <- as.factor(train_input$phone_mobile_valid)
+train_input$has_other_cards <- as.factor(train_input$has_other_cards)
+train_input$foreign_request <- as.factor(train_input$foreign_request)
+train_input$source <- as.factor(train_input$source)
+train_input$device_os <- as.factor(train_input$device_os)
+train_input$keep_alive_session <- as.factor(train_input$keep_alive_session)
+train_input$fraud_bool <- as.factor(train_input$fraud_bool)
+
+validation_input$payment_type <- as.factor(validation_input$payment_type)
+validation_input$employment_status <- as.factor(validation_input$employment_status)
+validation_input$email_is_free <- as.factor(validation_input$email_is_free)
+validation_input$housing_status <- as.factor(validation_input$housing_status)
+validation_input$phone_home_valid <- as.factor(validation_input$phone_home_valid)
+validation_input$phone_mobile_valid <- as.factor(validation_input$phone_mobile_valid)
+validation_input$has_other_cards <- as.factor(validation_input$has_other_cards)
+validation_input$foreign_request <- as.factor(validation_input$foreign_request)
+validation_input$source <- as.factor(validation_input$source)
+validation_input$device_os <- as.factor(validation_input$device_os)
+validation_input$keep_alive_session <- as.factor(validation_input$keep_alive_session)
+validation_input$fraud_bool <- as.factor(validation_input$fraud_bool)
+
+test_input$payment_type <- as.factor(test_input$payment_type)
+test_input$employment_status <- as.factor(test_input$employment_status)
+test_input$email_is_free <- as.factor(test_input$email_is_free)
+test_input$housing_status <- as.factor(test_input$housing_status)
+test_input$phone_home_valid <- as.factor(test_input$phone_home_valid)
+test_input$phone_mobile_valid <- as.factor(test_input$phone_mobile_valid)
+test_input$has_other_cards <- as.factor(test_input$has_other_cards)
+test_input$foreign_request <- as.factor(test_input$foreign_request)
+test_input$source <- as.factor(test_input$source)
+test_input$device_os <- as.factor(test_input$device_os)
+test_input$keep_alive_session <- as.factor(test_input$keep_alive_session)
+
+train_input$month <- NULL
+```
+
+<br>
+
+#### **Criação de Folds para os algoritmos que necessitarem**
+
+```{r creating folds}
+num_folds<-10
+set.seed(4)
+folds <- createFolds(train_input$fraud_bool, k=num_folds)
+save(folds, file="folds.Rdata")
+summary(folds)
+```
+<br>
+
+#### **Criação de Função de Métricas**
+
+```{r metrics function}
+err_metric=function(CM)
+{
+  TN =CM[1,1]
+  TP =CM[2,2]
+  FP =CM[2,1]
+  FN =CM[1,2]
+  precision =(TP)/(TP+FP)
+  recall_score =(TP)/(TP+FN)
+  f1_score=2*((precision*recall_score)/(precision+recall_score))
+  accuracy_model  =(TP+TN)/(TP+TN+FP+FN)
+  False_positive_rate =(FP)/(FP+TN)
+  False_negative_rate =(FN)/(FN+TP)
+  print(paste("Precision value of the model: ",round(precision,3)))
+  print(paste("Accuracy of the model: ",round(accuracy_model,3)))
+  print(paste("Recall value of the model: ",round(recall_score,3)))
+  print(paste("False Positive rate of the model: ",round(False_positive_rate,3)))
+  print(paste("False Negative rate of the model: ",round(False_negative_rate,3)))
+  print(paste("f1 score of the model: ",round(f1_score,3)))
+}
+
+```
+
+<br>
+
+### **kNN with Tidymodels**
+
+```{r knn tidymodels}
+#Creating the model
+model_knn <- nearest_neighbor(mode = "classification")
+
+#Fitting the train dataset to the model
+knn_fit <- model_knn %>%
+  parsnip::fit(fraud_bool ~ ., data = train_input)
+knn_fit
+
+#Predicting the fraud_bool values for the test dataset
+knn_preds <- predict(knn_fit, new_data = test_input)
+
+#Creating a dataset with two attributes - the original test fraud_bool and the predictions
+knn_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(knn_fit, validation_input))
+
+#Creating a confusion matrix
+knn_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(knn_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+knn_preds_1 <- knn_preds
+
+knn_preds_1$.pred_class<-as.character(knn_preds_1$.pred_class)
+knn_preds_1$.pred_class<-as.numeric(knn_preds_1$.pred_class)
+
+#Manipulating thw fraud_bool attribute to turn it into a numeric attribute
+knn_preds_2 <- knn_preds_1
+
+knn_preds_2$fraud_bool<-as.character(knn_preds_2$fraud_bool)
+knn_preds_2$fraud_bool<-as.numeric(knn_preds_2$fraud_bool)
+
+#Calculating the accuracy
+knn_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+knn_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(knn_fit, validation_input)) %>%
+  bind_cols(predict(knn_fit, validation_input, type = "prob"))
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input$fraud_bool, knn_preds$.pred_1)
+roc_object <- roc(validation_input$fraud_bool, knn_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+knn_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- kNN ")
+```
+
+<br>
+
+### **kNN with Caret v1**
+
+```{r knn caret}
+# set up 5-fold cross validation procedure
+trControl <- trainControl(method  = "cv", number  = 5)
+
+model_knn <- train(fraud_bool ~ .,
+                   method     = "knn",
+                   trControl  = trControl,
+                   metric     = "Accuracy",
+                   data       = train_input)
+
+model_knn
+
+knn_preds <- predict(model_knn, new_data = validation_input)
+
+#Creating a dataset with two attributes - the original test fraud_bool and the predictions
+knn_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input))
+
+colnames(knn_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+knn_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(knn_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+knn_preds_1 <- knn_preds
+
+knn_preds_1$.pred_class<-as.character(knn_preds_1$.pred_class)
+knn_preds_1$.pred_class<-as.numeric(knn_preds_1$.pred_class)
+
+#Manipulating thw fraud_bool attribute to turn it into a numeric attribute
+knn_preds_2 <- knn_preds_1
+
+knn_preds_2$fraud_bool<-as.character(knn_preds_2$fraud_bool)
+knn_preds_2$fraud_bool<-as.numeric(knn_preds_2$fraud_bool)
+
+#Calculating the accuracy
+knn_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+knn_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input)) %>%
+  bind_cols(predict(model_knn, validation_input, type = "prob"))
+
+colnames(knn_preds)[2] <- '.pred_class'
+colnames(knn_preds)[3] <- '.pred_0'
+colnames(knn_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input$fraud_bool, knn_preds$.pred_1)
+roc_object <- roc(validation_input$fraud_bool, knn_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+knn_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- kNN ")
+#Creating the Kaggle Submission File
+knn_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(model_knn, test_input)) %>%
+  bind_cols(predict(model_knn, test_input, type = "prob"))
+
+knn_preds_final$...1 <- test_input$...1
+knn_preds_final$...2 <- NULL
+knn_preds_final$"0" <- NULL
+colnames(knn_preds_final) <- c('ID','fraud_bool') 
+write_csv(knn_preds_final, file = "knn_pred.csv")
+```
+
+<br>
+
+### **Another kNN with Caret v2 (More Advanced)**
+
+```{r another knn caret v2}
+# set up 10-fold cross validation procedure
+trControl <- trainControl(method  = "cv", 
+                          number  = 10, 
+                          search = "grid")
+
+model_knn <- train(fraud_bool ~ .,
+             method     = "knn",
+             tuneGrid   = expand.grid(k = 1:20),
+             trControl  = trControl,
+             metric     = "Accuracy",
+             data       = train_input)
+
+model_knn
+
+#Creating a dataset with two attributes - the original test fraud_bool and the predictions
+knn_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input))
+
+colnames(knn_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+knn_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(knn_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+knn_preds_1 <- knn_preds
+
+knn_preds_1$.pred_class<-as.character(knn_preds_1$.pred_class)
+knn_preds_1$.pred_class<-as.numeric(knn_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+knn_preds_2 <- knn_preds_1
+
+knn_preds_2$fraud_bool<-as.character(knn_preds_2$fraud_bool)
+knn_preds_2$fraud_bool<-as.numeric(knn_preds_2$fraud_bool)
+
+#Calculating the accuracy
+knn_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+knn_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input)) %>%
+  bind_cols(predict(model_knn, validation_input, type = "prob"))
+
+colnames(knn_preds)[2] <- '.pred_class'
+colnames(knn_preds)[3] <- '.pred_0'
+colnames(knn_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input$fraud_bool, knn_preds$.pred_1)
+roc_object <- roc(validation_input$fraud_bool, knn_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+knn_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- kNN ")
+#Creating the Kaggle Submission File
+knn_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(model_knn, test_input)) %>%
+  bind_cols(predict(model_knn, test_input, type = "prob"))
+
+knn_preds_final$...1 <- test_input$...1
+knn_preds_final$...2 <- NULL
+knn_preds_final$"0" <- NULL
+colnames(knn_preds_final) <- c('ID','fraud_bool') 
+write_csv(knn_preds_final, file = "knn_pred_v2.csv")
+```
+<br>
+
+### **Another kNN with Caret v3 (With AUC Metric)**
+
+```{r another knn caret v3}
+#set up 10-fold cross validation procedure
+trControl <- trainControl(method  = "cv",
+                          number  = 10,
+                          classProbs = TRUE,
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+knnGrid <-  expand.grid(k = c(1:20))
+
+model_knn <- train(fraud_bool ~ .,
+             method     = "knn",
+             tuneGrid   = knnGrid,
+             trControl  = trControl,
+             metric     = "ROC",
+             data       = train_input_modified )
+
+model_knn
+
+plot(model_knn)
+
+knn_preds <- predict(model_knn, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+knn_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input_modified))
+
+colnames(knn_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+knn_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(knn_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+knn_preds_1 <- knn_preds
+
+#knn_preds_1$.pred_class<-as.character(knn_preds_1$.pred_class)
+knn_preds_1$.pred_class<-as.numeric(knn_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+knn_preds_2 <- knn_preds_1
+
+#knn_preds_2$fraud_bool<-as.character(knn_preds_2$fraud_bool)
+knn_preds_2$fraud_bool<-as.numeric(knn_preds_2$fraud_bool)
+
+#Calculating the accuracy
+knn_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+knn_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input_modified)) %>%
+  bind_cols(predict(model_knn, validation_input_modified, type = "prob"))
+
+colnames(knn_preds)[2] <- '.pred_class'
+colnames(knn_preds)[3] <- '.pred_0'
+colnames(knn_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(as.numeric(validation_input_modified$fraud_bool), knn_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, knn_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+knn_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- kNN ")
+#Creating the Kaggle Submission File
+knn_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(model_knn, test_input)) %>%
+  bind_cols(predict(model_knn, test_input, type = "prob"))
+
+knn_preds_final$...1 <- test_input$...1
+knn_preds_final$...2 <- NULL
+knn_preds_final$no <- NULL
+colnames(knn_preds_final) <- c('ID','fraud_bool') 
+write_csv(knn_preds_final, file = "knn_pred_v3.csv")
+```
+<br>
+
+### **Another kNN with Caret v4 (With AUC Metric and Over+Under-Sampling)**
+
+```{r another knn caret v4}
+#set up 10-fold cross validation procedure
+trControl <- trainControl(method  = "cv",
+                          number  = 10,
+                          classProbs = TRUE,
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+train_input_modified_knn <- ovun.sample(fraud_bool ~ ., data = train_input_modified, method = "both", N = nrow(train_input_modified), seed = 4)$data
+
+knnGrid <-  expand.grid(k = c(1:20))
+
+model_knn <- train(fraud_bool ~ .,
+             method     = "knn",
+             tuneGrid   = knnGrid,
+             trControl  = trControl,
+             metric     = "ROC",
+             data       = train_input_modified_knn)
+
+model_knn
+
+plot(model_knn)
+
+knn_preds <- predict(model_knn, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+knn_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input_modified))
+
+colnames(knn_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+knn_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(knn_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+knn_preds_1 <- knn_preds
+
+#knn_preds_1$.pred_class<-as.character(knn_preds_1$.pred_class)
+knn_preds_1$.pred_class<-as.numeric(knn_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+knn_preds_2 <- knn_preds_1
+
+#knn_preds_2$fraud_bool<-as.character(knn_preds_2$fraud_bool)
+knn_preds_2$fraud_bool<-as.numeric(knn_preds_2$fraud_bool)
+
+#Calculating the accuracy
+knn_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+knn_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input_modified)) %>%
+  bind_cols(predict(model_knn, validation_input_modified, type = "prob"))
+
+colnames(knn_preds)[2] <- '.pred_class'
+colnames(knn_preds)[3] <- '.pred_0'
+colnames(knn_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(as.numeric(validation_input_modified$fraud_bool), knn_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, knn_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+knn_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- kNN ")
+#Creating the Kaggle Submission File
+knn_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(model_knn, test_input)) %>%
+  bind_cols(predict(model_knn, test_input, type = "prob"))
+
+knn_preds_final$...1 <- test_input$...1
+knn_preds_final$...2 <- NULL
+knn_preds_final$no <- NULL
+colnames(knn_preds_final) <- c('ID','fraud_bool') 
+write_csv(knn_preds_final, file = "knn_pred_v4.csv")
+```
+
+<br>
+
+### **Another kNN with Caret v5 (With AUC Metric and Over-Sampling)**
+
+```{r another knn caret v5}
+#set up 10-fold cross validation procedure
+trControl <- trainControl(method  = "cv",
+                          number  = 10,
+                          classProbs = TRUE,
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+train_input_modified_knn <- ovun.sample(fraud_bool ~ ., data = train_input_modified, method = "over", seed = 4)$data
+
+knnGrid <-  expand.grid(k = c(1:20))
+
+model_knn <- train(fraud_bool ~ .,
+             method     = "knn",
+             tuneGrid   = knnGrid,
+             trControl  = trControl,
+             metric     = "ROC",
+             data       = train_input_modified_knn)
+
+model_knn
+
+plot(model_knn)
+
+knn_preds <- predict(model_knn, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+knn_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input_modified))
+
+colnames(knn_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+knn_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(knn_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+knn_preds_1 <- knn_preds
+
+#knn_preds_1$.pred_class<-as.character(knn_preds_1$.pred_class)
+knn_preds_1$.pred_class<-as.numeric(knn_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+knn_preds_2 <- knn_preds_1
+
+#knn_preds_2$fraud_bool<-as.character(knn_preds_2$fraud_bool)
+knn_preds_2$fraud_bool<-as.numeric(knn_preds_2$fraud_bool)
+
+#Calculating the accuracy
+knn_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(knn_preds_2$fraud_bool, knn_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+knn_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(model_knn, validation_input_modified)) %>%
+  bind_cols(predict(model_knn, validation_input_modified, type = "prob"))
+
+colnames(knn_preds)[2] <- '.pred_class'
+colnames(knn_preds)[3] <- '.pred_0'
+colnames(knn_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(as.numeric(validation_input_modified$fraud_bool), knn_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, knn_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+knn_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- kNN ")
+#Creating the Kaggle Submission File
+knn_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(model_knn, test_input)) %>%
+  bind_cols(predict(model_knn, test_input, type = "prob"))
+
+knn_preds_final$...1 <- test_input$...1
+knn_preds_final$...2 <- NULL
+knn_preds_final$no <- NULL
+colnames(knn_preds_final) <- c('ID','fraud_bool') 
+write_csv(knn_preds_final, file = "knn_pred_v5.csv")
+```
+<br>
+
+### **XGBoost v1 (with no hyperparameter tuning)**
+
+```{r XGBoost v1}
+#Creating the model
+model_xgboost <- boost_tree(mode = "classification", engine = "xgboost", tree_depth = 3,
+  trees = 30, mtry=10, loss_reduction=0.5, learn_rate=0.001, min_n=2)
+
+#Fitting the train dataset to the model
+xgboost_fit <- model_xgboost %>%
+  parsnip::fit(fraud_bool ~ ., data = train_input)
+xgboost_fit
+
+#Predicting the fraud_bool values for the test dataset
+xgboost_preds <- predict(xgboost_fit, new_data = validation_input)
+
+#Creating a dataset with two attributes - the original test fraud_bool and the predictions
+xgboost_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(xgboost_fit, validation_input))
+
+#Creating a confusion matrix
+xgboost_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(xgboost_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+xgboost_preds_1 <- xgboost_preds
+
+xgboost_preds_1$.pred_class<-as.numeric(xgboost_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+xgboost_preds_2 <- xgboost_preds_1
+
+xgboost_preds_2$fraud_bool<-as.numeric(xgboost_preds_2$fraud_bool)
+
+#Calculating the accuracy
+xgboost_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+xgboost_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(xgboost_fit, validation_input)) %>%
+  bind_cols(predict(xgboost_fit, validation_input, type = "prob"))
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input$fraud_bool, xgboost_preds$.pred_1)
+roc_object <- roc(validation_input$fraud_bool, xgboost_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+xgboost_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- XGBoost ")
+#Creating the Kaggle Submission File
+xgboost_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(xgboost_fit, test_input)) %>%
+  bind_cols(predict(xgboost_fit, test_input, type = "prob"))
+
+xgboost_preds_final$...1 <- test_input$...1
+xgboost_preds_final$.pred_class <- NULL
+xgboost_preds_final$.pred_0 <- NULL
+colnames(xgboost_preds_final) <- c('ID','fraud_bool') 
+write_csv(xgboost_preds_final, file = "xgboost_pred_v1.csv")
+```
+
+<br>
+
+### **XGBoost v2 (with hyperparameter tuning)**
+
+```{r XGBoost v2}
+#Setting up the tuning spec for this model
+ntrees <- 100
+xgb_spec <- boost_tree(
+  trees = ntrees,
+  tree_depth = tune(), min_n = tune(),
+  loss_reduction = tune(),                     ## first three: model complexity
+  sample_size = tune(), mtry = tune(),         ## randomness
+  learn_rate = tune()                          ## step size
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("classification")
+
+xgb_spec
+#Setting up a space-filling design to cover the hyperparameter space as well as possible
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), train_input),
+  learn_rate(),
+  size = 10
+)
+
+xgb_grid
+#Putting the model specification into a workflow
+xgb_wf <- workflow() %>%
+  add_formula(fraud_bool ~ .) %>%
+  add_model(xgb_spec)
+
+xgb_wf
+#Setting up cross-validation resamples
+set.seed(4)
+vb_folds <- vfold_cv(train_input, strata = fraud_bool)
+
+vb_folds
+
+set.seed(4)
+xgb_res <- tune_grid(
+  xgb_wf,
+  resamples = vb_folds,
+  grid = xgb_grid,
+  control = control_grid(save_pred = TRUE)
+)
+
+xgb_res
+#Exploring the metrics for the model
+collect_metrics(xgb_res)
+#Visualization of the models
+xgb_res %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  select(mean, mtry:sample_size) %>%
+  pivot_longer(mtry:sample_size,
+               values_to = "value",
+               names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+#Show best performing sets of parameters
+show_best(xgb_res, "roc_auc")
+#Choosing the best model with the best performance 
+best_auc <- select_best(xgb_res, "roc_auc")
+#Finalize our tuneable workflow with the optimal parameter values
+final_xgb <- finalize_workflow(
+  xgb_wf,
+  best_auc
+)
+
+final_xgb
+#Plotting the most important attributes for variable importance
+final_xgb %>%
+  fit(data = train_input) %>%
+  extract_fit_parsnip() %>%
+  vip(geom = "point")
+#Fit our model one last time on the training data and evaluate our model one last time on the validation set (for this step to work, we need the variable data_split from Task 1)
+final_res <- last_fit(final_xgb, data_split)
+
+collect_metrics(final_res)
+#can also create a ROC curve for the validation set
+final_res %>%
+  collect_predictions() %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(linewidth = 1.5, color = "midnightblue") +
+  geom_abline(
+    lty = 2, alpha = 0.5,
+    color = "gray50",
+    size = 1.2
+  )
+a <- as.numeric(best_auc[,1])
+b <- as.numeric(best_auc[,2])
+c <- as.numeric(best_auc[,3])
+d <- as.numeric(best_auc[,4])
+e <- as.numeric(best_auc[,5])
+f <- as.numeric(best_auc[,6])
+##Part 2 - Create the model and get the predictions
+#Creating the model
+model_xgboost <- parsnip::boost_tree(mode = "classification", engine = "xgboost", tree_depth =c,
+  trees = ntrees, mtry=a, loss_reduction =e, learn_rate=d, min_n=b, sample_size =f)
+
+#Fitting the train dataset to the model
+xgboost_fit <- model_xgboost %>%
+  parsnip::fit(fraud_bool ~ ., data = train_input)
+xgboost_fit
+
+validation_input$phone_home_valid <- as.factor(validation_input$phone_home_valid)
+validation_input$keep_alive_session <- as.factor(validation_input$keep_alive_session)
+
+
+#Predicting the fraud_bool values for the test dataset
+xgboost_preds <- predict(xgboost_fit, new_data = validation_input)
+
+#Creating a dataset with two attributes - the original test fraud_bool and the predictions
+xgboost_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(xgboost_fit, validation_input))
+
+#Creating a confusion matrix
+xgboost_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(xgboost_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+xgboost_preds_1 <- xgboost_preds
+
+xgboost_preds_1$.pred_class<-as.numeric(xgboost_preds_1$.pred_class)
+
+#Manipulating thw fraud_bool attribute to turn it into a numeric attribute
+xgboost_preds_2 <- xgboost_preds_1
+
+xgboost_preds_2$fraud_bool<-as.numeric(xgboost_preds_2$fraud_bool)
+
+#Calculating the accuracy
+xgboost_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+xgboost_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(xgboost_fit, validation_input)) %>%
+  bind_cols(predict(xgboost_fit, validation_input, type = "prob"))
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input$fraud_bool, xgboost_preds$.pred_1)
+roc_object <- roc(validation_input$fraud_bool, xgboost_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+xgboost_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- XGBoost ")
+#Creating the Kaggle Submission File
+xgboost_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(xgboost_fit, test_input)) %>%
+  bind_cols(predict(xgboost_fit, test_input, type = "prob"))
+
+xgboost_preds_final$...1 <- test_input$...1
+xgboost_preds_final$.pred_class <- NULL
+xgboost_preds_final$.pred_0 <- NULL
+colnames(xgboost_preds_final) <- c('ID','fraud_bool') 
+write_csv(xgboost_preds_final, file = "xgboost_pred_v2.csv")
+```
+<br>
+
+### **XGBoost v3 (with hyperparameter tuning & oversampling)**
+
+```{r XGBoost v3}
+#Setting up the tuning spec for this model
+ntrees <- 100
+xgb_spec <- boost_tree(
+  trees = ntrees,
+  tree_depth = tune(), min_n = tune(),
+  loss_reduction = tune(),                     ## first three: model complexity
+  sample_size = tune(), mtry = tune(),         ## randomness
+  learn_rate = tune()                          ## step size
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("classification")
+
+train_input_modified_xgboost <- ovun.sample(fraud_bool ~ ., data = train_input, method = "over", seed = 4)$data
+
+xgb_spec
+#Setting up a space-filling design to cover the hyperparameter space as well as possible
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), train_input_modified_xgboost),
+  learn_rate(),
+  size = 20)
+
+xgb_grid
+#Putting the model specification into a workflow
+xgb_wf <- workflow() %>%
+  add_formula(fraud_bool ~ .) %>%
+  add_model(xgb_spec)
+
+xgb_wf
+#Setting up cross-validation resamples
+set.seed(4)
+vb_folds <- vfold_cv(train_input_modified_xgboost, strata = fraud_bool)
+
+vb_folds
+
+set.seed(4)
+xgb_res <- tune_grid(
+  xgb_wf,
+  resamples = vb_folds,
+  grid = xgb_grid,
+  control = control_grid(save_pred = TRUE)
+)
+
+xgb_res
+#Exploring the metrics for the model
+collect_metrics(xgb_res)
+#Visualization of the models
+xgb_res %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  select(mean, mtry:sample_size) %>%
+  pivot_longer(mtry:sample_size,
+               values_to = "value",
+               names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+#Show best performing sets of parameters
+show_best(xgb_res, "roc_auc")
+#Choosing the best model with the best performance 
+best_auc <- select_best(xgb_res, "roc_auc")
+#Finalize our tuneable workflow with the optimal parameter values
+final_xgb <- finalize_workflow(
+  xgb_wf,
+  best_auc
+)
+
+final_xgb
+#Plotting the most important attributes for variable importance
+final_xgb %>%
+  fit(data = train_input_modified_xgboost) %>%
+  extract_fit_parsnip() %>%
+  vip(geom = "point")
+#Fit our model one last time on the training data and evaluate our model one last time on the validation set (for this step to work, we need the variable data_split from Task 1)
+final_res <- last_fit(final_xgb, data_split)
+
+collect_metrics(final_res)
+#can also create a ROC curve for the validation set
+final_res %>%
+  collect_predictions() %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(linewidth = 1.5, color = "midnightblue") +
+  geom_abline(
+    lty = 2, alpha = 0.5,
+    color = "gray50",
+    linewidth = 1.2
+  )
+a <- as.numeric(best_auc[,1])
+b <- as.numeric(best_auc[,2])
+c <- as.numeric(best_auc[,3])
+d <- as.numeric(best_auc[,4])
+e <- as.numeric(best_auc[,5])
+f <- as.numeric(best_auc[,6])
+##Part 2 - Create the model and get the predictions
+#Creating the model
+model_xgboost <- parsnip::boost_tree(mode = "classification", engine = "xgboost", tree_depth =c,
+  trees = ntrees, mtry=a, loss_reduction =e, learn_rate=d, min_n=b, sample_size =f)
+
+#Fitting the train dataset to the model
+xgboost_fit <- model_xgboost %>%
+  parsnip::fit(fraud_bool ~ ., data = train_input_modified_xgboost)
+xgboost_fit
+
+#Predicting the fraud_bool values for the test dataset
+xgboost_preds <- predict(xgboost_fit, new_data = validation_input)
+
+#Creating a dataset with two attributes - the original test fraud_bool and the predictions
+xgboost_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(xgboost_fit, validation_input))
+
+#Creating a confusion matrix
+xgboost_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(xgboost_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+xgboost_preds_1 <- xgboost_preds
+
+xgboost_preds_1$.pred_class<-as.numeric(xgboost_preds_1$.pred_class)
+
+#Manipulating thw fraud_bool attribute to turn it into a numeric attribute
+xgboost_preds_2 <- xgboost_preds_1
+
+xgboost_preds_2$fraud_bool<-as.numeric(xgboost_preds_2$fraud_bool)
+
+#Calculating the accuracy
+xgboost_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(xgboost_preds_2$fraud_bool, xgboost_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+xgboost_preds <- validation_input %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(xgboost_fit, validation_input)) %>%
+  bind_cols(predict(xgboost_fit, validation_input, type = "prob"))
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input$fraud_bool, xgboost_preds$.pred_1)
+roc_object <- roc(validation_input$fraud_bool, xgboost_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+xgboost_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- XGBoost ")
+#Creating the Kaggle Submission File
+xgboost_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(xgboost_fit, test_input)) %>%
+  bind_cols(predict(xgboost_fit, test_input, type = "prob"))
+
+xgboost_preds_final$...1 <- test_input$...1
+xgboost_preds_final$.pred_class <- NULL
+xgboost_preds_final$.pred_0 <- NULL
+colnames(xgboost_preds_final) <- c('ID','fraud_bool') 
+write_csv(xgboost_preds_final, file = "xgboost_pred_v3.csv")
+```
+
+<br>
+
+### **Naive-Bayes**
+
+```{r naive-bayes}
+# set up tuning grid
+search_grid <- expand.grid(
+  usekernel = c(TRUE, FALSE),
+  laplace = 0:5,
+  adjust = 1:3
+)
+
+trControl <- trainControl(method  = "cv", 
+                          number  = 10, 
+                          classProbs = TRUE, 
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+# train model
+nb <- train(fraud_bool ~ .,
+  method = "naive_bayes",
+  trControl = trControl,
+  tuneGrid = search_grid,
+  metric="ROC",
+  data = train_input_modified)
+
+nb
+
+nb_preds <- predict(nb, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+nb_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(nb, validation_input_modified))
+
+colnames(nb_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+nb_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(nb_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+nb_preds_1 <- nb_preds
+
+nb_preds_1$.pred_class<-as.numeric(nb_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+nb_preds_2 <- nb_preds_1
+
+nb_preds_2$fraud_bool<-as.numeric(nb_preds_2$fraud_bool)
+
+#Calculating the accuracy
+nb_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+nb_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(nb, validation_input_modified)) %>%
+  bind_cols(predict(nb, validation_input_modified, type = "prob"))
+
+colnames(nb_preds)[2] <- '.pred_class'
+colnames(nb_preds)[3] <- '.pred_0'
+colnames(nb_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input_modified$fraud_bool, nb_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, nb_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+nb_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- Naive-Bayes ")
+#Creating the Kaggle Submission File
+nb_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(nb, test_input)) %>%
+  bind_cols(predict(nb, test_input, type = "prob"))
+
+nb_preds_final$...1 <- test_input$...1
+nb_preds_final$...2 <- NULL
+nb_preds_final$no <- NULL
+colnames(nb_preds_final) <- c('ID','fraud_bool') 
+write_csv(nb_preds_final, file = "nb_pred.csv")
+```
+<br>
+
+### **Naive-Bayes v2 (with over+under-sampling to balance domain learning)**
+
+```{r naive-bayes v2}
+# set up tuning grid
+search_grid <- expand.grid(
+  usekernel = c(TRUE, FALSE),
+  laplace = 0:5,
+  adjust = 1:3
+)
+
+trControl <- trainControl(method  = "cv", 
+                          number  = 10, 
+                          classProbs = TRUE, 
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+train_input_modified_nb <- ovun.sample(fraud_bool ~ ., data = train_input_modified, method = "both", N = nrow(train_input_modified), seed = 4)$data
+
+# train model
+nb <- train(fraud_bool ~ .,
+  method = "naive_bayes",
+  trControl = trControl,
+  tuneGrid = search_grid,
+  metric="ROC",
+  data = train_input_modified_nb)
+
+nb
+
+nb_preds <- predict(nb, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+nb_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(nb, validation_input_modified))
+
+colnames(nb_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+nb_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(nb_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+nb_preds_1 <- nb_preds
+
+nb_preds_1$.pred_class<-as.numeric(nb_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+nb_preds_2 <- nb_preds_1
+
+nb_preds_2$fraud_bool<-as.numeric(nb_preds_2$fraud_bool)
+
+#Calculating the accuracy
+nb_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+nb_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(nb, validation_input_modified)) %>%
+  bind_cols(predict(nb, validation_input_modified, type = "prob"))
+
+colnames(nb_preds)[2] <- '.pred_class'
+colnames(nb_preds)[3] <- '.pred_0'
+colnames(nb_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input_modified$fraud_bool, nb_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, nb_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+nb_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- Naive-Bayes ")
+#Creating the Kaggle Submission File
+nb_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(nb, test_input)) %>%
+  bind_cols(predict(nb, test_input, type = "prob"))
+
+nb_preds_final$...1 <- test_input$...1
+nb_preds_final$...2 <- NULL
+nb_preds_final$no <- NULL
+colnames(nb_preds_final) <- c('ID','fraud_bool') 
+write_csv(nb_preds_final, file = "nb_pred_v2.csv")
+```
+
+<br>
+
+### **Naive-Bayes v3 (with over-sampling to balance domain learning)**
+
+```{r naive-bayes v3}
+# set up tuning grid
+search_grid <- expand.grid(
+  usekernel = c(TRUE, FALSE),
+  laplace = 0:5,
+  adjust = 1:3
+)
+
+trControl <- trainControl(method  = "cv", 
+                          number  = 10, 
+                          classProbs = TRUE, 
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+train_input_modified_nb <- ovun.sample(fraud_bool ~ ., data = train_input_modified, method = "over", seed = 4)$data
+
+# train model
+nb <- train(fraud_bool ~ .,
+  method = "naive_bayes",
+  trControl = trControl,
+  tuneGrid = search_grid,
+  metric="ROC",
+  data = train_input_modified_nb)
+
+nb
+
+nb_preds <- predict(nb, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+nb_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(nb, validation_input_modified))
+
+colnames(nb_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+nb_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(nb_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+nb_preds_1 <- nb_preds
+
+nb_preds_1$.pred_class<-as.numeric(nb_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+nb_preds_2 <- nb_preds_1
+
+nb_preds_2$fraud_bool<-as.numeric(nb_preds_2$fraud_bool)
+
+#Calculating the accuracy
+nb_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(nb_preds_2$fraud_bool, nb_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+nb_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(nb, validation_input_modified)) %>%
+  bind_cols(predict(nb, validation_input_modified, type = "prob"))
+
+colnames(nb_preds)[2] <- '.pred_class'
+colnames(nb_preds)[3] <- '.pred_0'
+colnames(nb_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input_modified$fraud_bool, nb_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, nb_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+nb_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- Naive-Bayes ")
+#Creating the Kaggle Submission File
+nb_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(nb, test_input)) %>%
+  bind_cols(predict(nb, test_input, type = "prob"))
+
+nb_preds_final$...1 <- test_input$...1
+nb_preds_final$...2 <- NULL
+nb_preds_final$no <- NULL
+colnames(nb_preds_final) <- c('ID','fraud_bool') 
+write_csv(nb_preds_final, file = "nb_pred_v3.csv")
+```
+<br>
+
+### **Classification and Regression Trees (CART)**
+
+```{r cart}
+# set up tuning grid
+cart_grid <-  expand.grid(cp = c(0:0.05))
+
+trControl <- trainControl(method  = "cv", 
+                          number  = 10, 
+                          classProbs = TRUE, 
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+train_input_modified_cart <- ovun.sample(fraud_bool ~ ., data = train_input_modified, method = "over", seed = 4)$data
+
+# train model
+cart <- train(fraud_bool ~ .,
+  method = "rpart",
+  trControl = trControl,
+  tuneGrid = cart_grid,
+  metric="ROC",
+  data = train_input_modified_cart)
+
+cart
+
+cart_preds <- predict(cart, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+cart_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(cart, validation_input_modified))
+
+colnames(cart_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+cart_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(cart_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+cart_preds_1 <- cart_preds
+
+cart_preds_1$.pred_class<-as.numeric(cart_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+cart_preds_2 <- cart_preds_1
+
+cart_preds_2$fraud_bool<-as.numeric(cart_preds_2$fraud_bool)
+
+#Calculating the accuracy
+cart_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(cart_preds_2$fraud_bool, cart_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(cart_preds_2$fraud_bool, cart_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(cart_preds_2$fraud_bool, cart_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(cart_preds_2$fraud_bool, cart_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+cart_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(cart, validation_input_modified)) %>%
+  bind_cols(predict(cart, validation_input_modified, type = "prob"))
+
+colnames(cart_preds)[2] <- '.pred_class'
+colnames(cart_preds)[3] <- '.pred_0'
+colnames(cart_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input_modified$fraud_bool, cart_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, cart_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+cart_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- CART ")
+#Creating the Kaggle Submission File
+cart_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(cart, test_input)) %>%
+  bind_cols(predict(cart, test_input, type = "prob"))
+
+cart_preds_final$...1 <- test_input$...1
+cart_preds_final$...2 <- NULL
+cart_preds_final$no <- NULL
+colnames(cart_preds_final) <- c('ID','fraud_bool') 
+write_csv(cart_preds_final, file = "cart_pred_v1.csv")
+```
+
+<br>
+
+### **Random Forests**
+
+```{r rf v1}
+trControl <- trainControl(method  = "cv", 
+                          number  = 10, 
+                          classProbs = TRUE, 
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+train_input_modified_rf <- ovun.sample(fraud_bool ~ ., data = train_input_modified, method = "over", seed = 4)$data
+
+# Algorithm Tune (tuneRF)
+set.seed(4)
+bestmtry <- tuneRF(train_input_modified_rf[,c(0:30)], train_input_modified_rf[,c(31)], stepFactor=1.5, improve=1e-5, ntree=500)
+print(bestmtry)
+plot(bestmtry)
+
+# set up tuning grid
+rf_grid <-  expand.grid(mtry = c(4:5))
+
+# train model
+rf <- train(fraud_bool ~ .,
+  method = "rf",
+  trControl = trControl,
+  tuneGrid = rf_grid,
+  metric="ROC",
+  data = train_input_modified_rf)
+
+rf
+
+rf_preds <- predict(rf, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+rf_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(rf, validation_input_modified))
+
+colnames(rf_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+rf_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(rf_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+rf_preds_1 <- rf_preds
+
+rf_preds_1$.pred_class<-as.numeric(rf_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+rf_preds_2 <- rf_preds_1
+
+rf_preds_2$fraud_bool<-as.numeric(rf_preds_2$fraud_bool)
+
+#Calculating the accuracy
+rf_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(rf_preds_2$fraud_bool, rf_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(rf_preds_2$fraud_bool, rf_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(rf_preds_2$fraud_bool, rf_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(rf_preds_2$fraud_bool, rf_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+rf_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(rf, validation_input_modified)) %>%
+  bind_cols(predict(rf, validation_input_modified, type = "prob"))
+
+colnames(rf_preds)[2] <- '.pred_class'
+colnames(rf_preds)[3] <- '.pred_0'
+colnames(rf_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input_modified$fraud_bool, rf_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, rf_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+rf_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- Random Forest ")
+#Creating the Kaggle Submission File
+rf_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(rf, test_input)) %>%
+  bind_cols(predict(rf, test_input, type = "prob"))
+
+rf_preds_final$...1 <- test_input$...1
+rf_preds_final$...2 <- NULL
+rf_preds_final$no <- NULL
+colnames(rf_preds_final) <- c('ID','fraud_bool') 
+write_csv(rf_preds_final, file = "rf_pred_v1.csv")
+```
+
+<br>
+
+### **Bagged Cart Trees**
+
+```{r bagged cart v1}
+# set up tuning grid
+trControl <- trainControl(method  = "cv", 
+                          number  = 10, 
+                          classProbs = TRUE, 
+                          summaryFunction = twoClassSummary)
+
+train_input_modified <- train_input
+levels(train_input_modified$fraud_bool) <- c('no','yes')
+validation_input_modified <- validation_input
+levels(validation_input_modified$fraud_bool) <- c('no','yes')
+
+train_input_modified_bagged_cart <- ovun.sample(fraud_bool ~ ., data = train_input_modified, method = "over", seed = 4)$data
+
+# train model
+bagged_cart <- train(fraud_bool ~ .,
+  method = "treebag",
+  trControl = trControl,
+  metric="ROC",
+  data = train_input_modified_bagged_cart)
+
+bagged_cart
+
+bagged_cart_preds <- predict(bagged_cart, new_data = validation_input_modified)
+
+#Creating a dataset with two attributes - the original validation fraud_bool and the predictions
+bagged_cart_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(bagged_cart, validation_input_modified))
+
+colnames(bagged_cart_preds)[2] <- '.pred_class'
+
+#Creating a confusion matrix
+bagged_cart_preds %>%
+  conf_mat(truth = fraud_bool, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+#Creating a confusion matrix for the metrics function
+conf_mat <- conf_mat(bagged_cart_preds, truth = fraud_bool, estimate = .pred_class)
+CM <- matrix(unlist(conf_mat), ncol = 2)
+err_metric(CM)
+
+#Manipulating the predictions in order to turn them into a numeric attribute
+bagged_cart_preds_1 <- bagged_cart_preds
+
+bagged_cart_preds_1$.pred_class<-as.numeric(bagged_cart_preds_1$.pred_class)
+
+#Manipulating the fraud_bool attribute to turn it into a numeric attribute
+bagged_cart_preds_2 <- bagged_cart_preds_1
+
+bagged_cart_preds_2$fraud_bool<-as.numeric(bagged_cart_preds_2$fraud_bool)
+
+#Calculating the accuracy
+bagged_cart_preds %>%
+  yardstick::accuracy(truth = fraud_bool, estimate = .pred_class)
+
+#Creation of a confusion matrix in order to...
+xtab <- table(bagged_cart_preds_2$fraud_bool, bagged_cart_preds_2$.pred_class)
+cm <- caret::confusionMatrix(xtab)
+cm
+
+# to calculate precision
+recall <- Metrics::recall(bagged_cart_preds_2$fraud_bool, bagged_cart_preds_2$.pred_class)
+recall
+
+# to calculate precision
+precision <- Metrics::precision(bagged_cart_preds_2$fraud_bool, bagged_cart_preds_2$.pred_class)
+precision
+
+# to calculate f1_score
+f1_score <- Metrics::f1(bagged_cart_preds_2$fraud_bool, bagged_cart_preds_2$.pred_class)
+f1_score
+
+#Creating a dataset with four attributes - the original test fraud_bool, the predictions and its probabilities
+bagged_cart_preds <- validation_input_modified %>%
+  dplyr::select(fraud_bool) %>%
+  bind_cols(predict(bagged_cart, validation_input_modified)) %>%
+  bind_cols(predict(bagged_cart, validation_input_modified, type = "prob"))
+
+colnames(bagged_cart_preds)[2] <- '.pred_class'
+colnames(bagged_cart_preds)[3] <- '.pred_0'
+colnames(bagged_cart_preds)[4] <- '.pred_1'
+
+#Calculating the Area under the Curve KPI
+Metrics::auc(validation_input_modified$fraud_bool, bagged_cart_preds$.pred_1)
+roc_object <- roc(validation_input_modified$fraud_bool, bagged_cart_preds$.pred_1)
+pROC::auc(roc_object)
+
+#Plotting the ROC Curve
+bagged_cart_preds %>%
+  roc_curve(fraud_bool, .pred_0) %>%
+  autoplot()
+plot(roc_object ,main ="ROC curve -- Bagged CART ")
+#Creating the Kaggle Submission File
+bagged_cart_preds_final <- test_input %>%
+  dplyr::select(...1) %>%
+  bind_cols(predict(bagged_cart, test_input)) %>%
+  bind_cols(predict(bagged_cart, test_input, type = "prob"))
+
+bagged_cart_preds_final$...1 <- test_input$...1
+bagged_cart_preds_final$...2 <- NULL
+bagged_cart_preds_final$no <- NULL
+colnames(bagged_cart_preds_final) <- c('ID','fraud_bool') 
+write_csv(bagged_cart_preds_final, file = "bagged_cart_pred_v1.csv")
+```
